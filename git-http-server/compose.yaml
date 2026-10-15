@@ -1,0 +1,11 @@
+services:
+  git-server:
+    build: .
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - git-data:/srv/git
+    restart: unless-stopped
+
+volumes:
+  git-data:
