@@ -4,7 +4,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     apache2 git && \
     rm -rf /var/lib/apt/lists/* && \
-    a2enmod cgi env alias auth_basic authn_core authn_file authz_core authz_user && \
+    a2enmod cgid env alias auth_basic authn_core authn_file authz_core authz_user && \
     mkdir -p /srv/git && \
     chown www-data:www-data /srv/git
 
