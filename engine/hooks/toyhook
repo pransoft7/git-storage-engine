@@ -1,0 +1,4 @@
+#!/bin/sh
+# Installed under the names pre-receive and reference-transaction.
+# `exec` keeps this process's parent = git receive-pack, which the engine uses as the push id.
+exec /usr/local/bin/toyengine hook "$(basename "$0")" "$@"

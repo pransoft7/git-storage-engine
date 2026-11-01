@@ -1,1 +1,7 @@
 git-http-server/data
+.DS_Store
+git-http-server/backups
+git-http-server/experiments
+/CLAUDE.md
+/docs/
+engine/scripts
