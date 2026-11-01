@@ -2,8 +2,9 @@
 // invocation (stdin, args, environment, pid) into calls on the coordinator and
 // translates the result back into an exit code.
 //
-//	toyengine hook <hook-name> [hook args...]   called by hooks/toyhook
-//	toyengine inspect <repo>                    dump the log of a repo
+//	toyengine hook <hook-name> [hook args...]        called by hooks/toyhook
+//	toyengine inspect <repo>                         dump the log of a repo
+//	toyengine replay <repo> --into <dir>             replay the log into a bare repo
 package main
 
 import (
@@ -19,6 +20,7 @@ import (
 	"toyengine/internal/coordinator"
 	"toyengine/internal/hookio"
 	"toyengine/internal/node"
+	"toyengine/internal/replay"
 	"toyengine/internal/store"
 )
 
@@ -37,13 +39,15 @@ func main() {
 			usage()
 		}
 		os.Exit(runInspect(os.Args[2]))
+	case "replay":
+		os.Exit(runReplay(os.Args[2:]))
 	default:
 		usage()
 	}
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: toyengine hook <name> [args...] | toyengine inspect <repo>")
+	fmt.Fprintln(os.Stderr, "usage: toyengine hook <name> [args...] | toyengine inspect <repo> | toyengine replay <repo> --into <dir>")
 	os.Exit(2)
 }
 
@@ -83,6 +87,11 @@ func newLogf(repo, hook string) func(string, ...any) {
 }
 
 func runHook(name string, args []string) int {
+	// Replay sets TOY_REPLAY=1 so that engine hooks installed in the target repo
+	// are no-ops: replay drives ref updates itself and must not re-publish them.
+	if os.Getenv("TOY_REPLAY") == "1" {
+		return 0
+	}
 	if name != "pre-receive" && name != "reference-transaction" {
 		return 0 // not a hook we care about
 	}
@@ -153,6 +162,46 @@ func runHook(name string, args []string) int {
 			}
 		}
 	}
+	return 0
+}
+
+func runReplay(args []string) int {
+	// parse: <repo> --into <dir>
+	var repo, intoDir string
+	if len(args) >= 1 {
+		repo = args[0]
+	}
+	for i := 1; i+1 < len(args); i++ {
+		if args[i] == "--into" {
+			intoDir = args[i+1]
+			break
+		}
+	}
+	if repo == "" || intoDir == "" {
+		fmt.Fprintln(os.Stderr, "usage: toyengine replay <repo> --into <dir>")
+		return 2
+	}
+	if _, err := os.Stat(filepath.Join(intoDir, "HEAD")); err != nil {
+		fmt.Fprintf(os.Stderr, "toyengine: %s is not a bare git repo (run: git init --bare %s)\n", intoDir, intoDir)
+		return 1
+	}
+	st, err := store.NewLocalDirStore(filepath.Join(dataDir(), "store", repo))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "toyengine:", err)
+		return 1
+	}
+	// Node state tracks replay progress for this target repo; lives inside it.
+	ns, err := node.Open(filepath.Join(intoDir, "toyengine"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "toyengine:", err)
+		return 1
+	}
+	if err := replay.Apply(st, intoDir, ns, replay.Opts{}); err != nil {
+		fmt.Fprintln(os.Stderr, "toyengine: replay failed:", err)
+		return 1
+	}
+	w, _ := ns.Applied()
+	fmt.Printf("replay: %s replayed through seq %d\n", repo, w)
 	return 0
 }
 

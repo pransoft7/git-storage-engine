@@ -44,10 +44,70 @@ func TestApplied(t *testing.T) {
 	if n, err := s.Applied(); err != nil || n != 0 {
 		t.Fatalf("got %d,%v", n, err)
 	}
-	if err := s.SetApplied(7); err != nil {
-		t.Fatal(err)
+	for seq := uint64(1); seq <= 7; seq++ {
+		if err := s.SetApplied(seq); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if n, err := s.Applied(); err != nil || n != 7 {
 		t.Fatalf("got %d,%v", n, err)
+	}
+}
+
+// TestAppliedGap: if seq 3 is missing, Applied() must stop at 2 even though 4 is committed.
+func TestAppliedGap(t *testing.T) {
+	s, _ := node.Open(t.TempDir())
+	for _, seq := range []uint64{1, 2, 4} {
+		if err := s.SetApplied(seq); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := s.Applied(); err != nil || n != 2 {
+		t.Fatalf("want 2, got %d,%v", n, err)
+	}
+}
+
+// TestAppliedFillsGap: once the missing seq is committed, Applied() advances past the gap.
+func TestAppliedFillsGap(t *testing.T) {
+	s, _ := node.Open(t.TempDir())
+	for _, seq := range []uint64{1, 2, 4} {
+		if err := s.SetApplied(seq); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.SetApplied(3); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.Applied(); err != nil || n != 4 {
+		t.Fatalf("want 4, got %d,%v", n, err)
+	}
+}
+
+// TestAppliedOutOfOrder: commits arriving out of log order still produce the correct watermark.
+func TestAppliedOutOfOrder(t *testing.T) {
+	s, _ := node.Open(t.TempDir())
+	for _, seq := range []uint64{4, 3, 1, 2} {
+		if err := s.SetApplied(seq); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := s.Applied(); err != nil || n != 4 {
+		t.Fatalf("want 4, got %d,%v", n, err)
+	}
+}
+
+// TestSetAppliedIdempotent: calling SetApplied with the same seq twice must not error.
+func TestSetAppliedIdempotent(t *testing.T) {
+	s, _ := node.Open(t.TempDir())
+	for seq := uint64(1); seq <= 3; seq++ {
+		if err := s.SetApplied(seq); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.SetApplied(3); err != nil {
+		t.Fatalf("second SetApplied(3) should be fine: %v", err)
+	}
+	if n, err := s.Applied(); err != nil || n != 3 {
+		t.Fatalf("want 3, got %d,%v", n, err)
 	}
 }
