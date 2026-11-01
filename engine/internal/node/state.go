@@ -9,8 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
-
 	"toyengine/internal/model"
 )
 
@@ -25,9 +23,12 @@ type Pending struct {
 // State lives in a directory on the node's local disk.
 type State struct{ dir string }
 
-// Open creates (if required) and returns the state rooted at dir.
+// Open creates node level directories (if required) and returns the state rooted at dir.
 func Open(dir string) (*State, error) {
 	if err := os.MkdirAll(filepath.Join(dir, "pending"), 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "committed"), 0o755); err != nil {
 		return nil, err
 	}
 	return &State{dir: dir}, nil
@@ -69,19 +70,36 @@ func (s *State) DeletePending(pushID string) error {
 
 // SetApplied records that the local repo now reflects the log up to seq.
 func (s *State) SetApplied(seq uint64) error {
-	return writeAtomic(filepath.Join(s.dir, "applied"), seq)
+	path := filepath.Join(s.dir, "committed", strconv.FormatUint(seq, 10))
+	markerFile, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	return markerFile.Close()
 }
 
 // Applied returns the last applied log seq (0 if none).
 func (s *State) Applied() (uint64, error) {
-	b, err := os.ReadFile(filepath.Join(s.dir, "applied"))
+	dir, err := os.ReadDir(filepath.Join(s.dir, "committed"))
 	if errors.Is(err, fs.ErrNotExist) {
 		return 0, nil
 	}
 	if err != nil {
 		return 0, err
 	}
-	return strconv.ParseUint(strings.TrimSpace(string(b)), 10, 64)
+	entries := make(map[uint64]bool)
+	for _, entry := range dir {
+		n, err := strconv.ParseUint(entry.Name(), 10, 64)
+		if err != nil {
+			continue
+		}
+		entries[n] = true
+	}
+	w := uint64(0)
+	for entries[w+1] {
+		w++
+	}
+	return w, nil
 }
 
 func writeAtomic(path string, v any) error {
